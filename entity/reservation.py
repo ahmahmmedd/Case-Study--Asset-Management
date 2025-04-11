@@ -9,7 +9,6 @@ class Reservation:
         self.__end_date = end_date
         self.__status = status
 
-    # Getters
     @property
     def reservation_id(self):
         return self.__reservation_id
@@ -38,7 +37,6 @@ class Reservation:
     def status(self):
         return self.__status
 
-    # Setters
     @reservation_id.setter
     def reservation_id(self, value):
         self.__reservation_id = value

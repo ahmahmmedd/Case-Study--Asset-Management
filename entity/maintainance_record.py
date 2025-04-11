@@ -7,7 +7,6 @@ class MaintenanceRecord:
         self.__description = description
         self.__cost = cost
 
-    # Getters
     @property
     def maintenance_id(self):
         return self.__maintenance_id
@@ -28,7 +27,6 @@ class MaintenanceRecord:
     def cost(self):
         return self.__cost
 
-    # Setters
     @maintenance_id.setter
     def maintenance_id(self, value):
         self.__maintenance_id = value
