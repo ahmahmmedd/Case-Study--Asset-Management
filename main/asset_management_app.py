@@ -37,7 +37,7 @@ class AssetManagementApp:
                 elif choice == "2":
                     asset_id = int(input("Enter asset ID to update: "))
                     new_location = input("Enter new location: ")
-                    new_status = input("Enter new status: ")
+                    new_status = input("Enter new status(available/ in use / decommissioned / under maintenance): ")
                     self.service.update_asset(asset_id, new_location, new_status)
 
                 elif choice == "3":
