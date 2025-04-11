@@ -2,6 +2,7 @@ import mysql.connector
 from util.DBConnection import DBConnection
 from myexception.exceptions import AssetNotFoundException
 from myexception.exceptions import AssetNotMaintainException
+from datetime import date, timedelta
 
 class AssetManagementServiceImpl:
     def __init__(self):
@@ -17,7 +18,8 @@ class AssetManagementServiceImpl:
             cursor.execute(query, (name, asset_type, serial_number,
                                    purchase_date, location, status, owner_id))
             conn.commit()
-            print("asset added successfully!")
+            asset_id = cursor.lastrowid
+            print(f"asset added successfully! asset id: {asset_id}")
             return cursor.lastrowid
         except mysql.connector.Error as e:
             print(f"database error: {e}")
@@ -77,31 +79,61 @@ class AssetManagementServiceImpl:
         cursor = None
         try:
             conn = self.db.get_connection()
-            cursor = conn.cursor()
-            check_query = "select status from assets where asset_id = %s"
-            cursor.execute(check_query, (asset_id,))
-            row = cursor.fetchone()
-            if not row:
-                raise AssetNotFoundException("asset id not found.")
-            if row[0].lower() != "available":
-                print("asset is not available for allocation.")
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("""
+                select status, purchase_date 
+                from assets 
+                where asset_id = %s
+            """, (asset_id,))
+            asset = cursor.fetchone()
+
+            if not asset:
+                raise AssetNotFoundException(f"asset id {asset_id} not found.")
+
+            if asset['status'].lower() != 'available':
+                print(f"cannot allocate asset - current status: {asset['status']}")
                 return False
-            update_query = "update assets set status = 'allocated', owner_id = %s where asset_id = %s"
-            cursor.execute(update_query, (employee_id, asset_id))
-            history_query = """insert into asset_allocations 
-                            (asset_id, employee_id, allocation_date) 
-                            values (%s, %s, %s)"""
-            cursor.execute(history_query, (asset_id, employee_id, allocation_date))
+
+            purchase_date = asset['purchase_date']
+            two_years_ago = date.today() - timedelta(days=365 * 2)
+
+            if purchase_date < two_years_ago:
+                cursor.execute("""
+                    select 1 from maintenance_records 
+                    where asset_id = %s 
+                    and maintenance_date >= %s
+                    limit 1
+                """, (asset_id, two_years_ago))
+
+                if not cursor.fetchone():
+                    raise AssetNotMaintainException(
+                        f"asset {asset_id} hasn't been maintained in the last 2 years")
+
+            cursor.execute("""
+                update assets 
+                set status = 'allocated', owner_id = %s 
+                where asset_id = %s
+            """, (employee_id, asset_id))
+
+            cursor.execute("""
+                insert into asset_allocations 
+                (asset_id, employee_id, allocation_date) 
+                values (%s, %s, %s)
+            """, (asset_id, employee_id, allocation_date))
+
             conn.commit()
-            print("asset allocated successfully!")
+            print(f"asset {asset_id} allocated successfully to employee {employee_id}!")
             return True
+
         except mysql.connector.Error as e:
             print(f"database error: {e}")
+            if conn:
+                conn.rollback()
             return False
         finally:
-            if cursor is not None:
+            if cursor:
                 cursor.close()
-            if conn is not None:
+            if conn:
                 conn.close()
 
     def deallocate_asset(self, asset_id):
@@ -134,29 +166,49 @@ class AssetManagementServiceImpl:
         try:
             conn = self.db.get_connection()
             cursor = conn.cursor()
-            check_query = "select status from assets where asset_id = %s"
-            cursor.execute(check_query, (asset_id,))
+
+            cursor.execute("""
+                select status from assets 
+                where asset_id = %s
+            """, (asset_id,))
             row = cursor.fetchone()
+
             if not row:
                 raise AssetNotFoundException("asset id not found.")
-            if row[0].lower() == "under maintenance":
+
+            status = row[0].lower()
+
+            if status == "under maintenance":
                 raise AssetNotMaintainException("asset is already under maintenance.")
-            query = "update assets set status = 'under maintenance' where asset_id = %s"
-            cursor.execute(query, (asset_id,))
-            maintenance_query = """insert into maintenance_records 
-                                (asset_id, maintenance_date, description, cost) 
-                                values (%s, %s, %s, %s)"""
-            cursor.execute(maintenance_query, (asset_id, maintenance_date, description, cost))
+
+            if status == "reserved":
+                raise AssetNotMaintainException("cannot perform maintenance on reserved asset.")
+
+            cursor.execute("""
+                update assets 
+                set status = 'under maintenance' 
+                where asset_id = %s
+            """, (asset_id,))
+
+            cursor.execute("""
+                insert into maintenance_records 
+                (asset_id, maintenance_date, description, cost) 
+                values (%s, %s, %s, %s)
+            """, (asset_id, maintenance_date, description, cost))
+
             conn.commit()
             print("maintenance recorded successfully!")
             return True
+
         except mysql.connector.Error as e:
             print(f"database error: {e}")
+            if conn:
+                conn.rollback()
             return False
         finally:
-            if cursor is not None:
+            if cursor:
                 cursor.close()
-            if conn is not None:
+            if conn:
                 conn.close()
 
     def reserve_asset(self, asset_id, employee_id, reservation_date, start_date, end_date):
@@ -180,7 +232,8 @@ class AssetManagementServiceImpl:
                                 values (%s, %s, %s, %s, %s, 'reserved')"""
             cursor.execute(reservation_query, (asset_id, employee_id, reservation_date, start_date, end_date))
             conn.commit()
-            print("asset reserved successfully!")
+            reservation_id = cursor.lastrowid
+            print(f"asset reserved successfully! reservation id: {reservation_id}")
             return True
         except mysql.connector.Error as e:
             print(f"database error: {e}")
